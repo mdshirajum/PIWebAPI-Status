@@ -1,0 +1,54 @@
+#--------------------------------------------------------------------------------
+# Configuration
+#--------------------------------------------------------------------------------
+# Web API URL
+#$ErrorActionPreference = 'SilentlyContinue'
+$url = 'https://piwebapi.webapiserver.net/piwebapi/system/status'
+
+$Username = 'username'
+$Password = ConvertTo-SecureString "password" -AsPlainText -Force
+$cred = New-Object System.Management.Automation.PSCredential $Username,$Password
+# Location code to search in the web content.
+# Also the tagname in PI. NOTE: Tag need to be created prior to running the script.
+$pointName = 'PI Web API.State'
+
+# Instance of the PI DA Server
+$piServer = 'PIServer'
+#Ignore invalid certificate errors when connecting to the URL. This is because the connector uses a self-signed certificate, but Powershell wants to use a validated certificate.
+Add-Type @"
+ using System;
+ using System.Net;
+ using System.Net.Security;
+ using System.Security.Cryptography.X509Certificates;
+ public class ServerCertificateValidationCallback
+ {
+   public static void Ignore()
+   {
+     ServicePointManager.ServerCertificateValidationCallback += 
+         delegate ( Object obj, 
+                    X509Certificate certificate, 
+                    X509Chain chain, 
+                    SslPolicyErrors errors
+                  )
+     {
+       return true;
+     };
+   }
+ }
+"@
+
+[ServerCertificateValidationCallback]::Ignore();
+# Load AFSDK
+[System.Reflection.Assembly]::LoadWithPartialName("OSIsoft.AFSDKCommon") | Out-Null
+[System.Reflection.Assembly]::LoadWithPartialName("OSIsoft.AFSDK") | Out-Null
+
+$response = Invoke-WebRequest -Method GET $url -Credential $cred | ConvertFrom-Json
+$value = $response.State
+$time = Get-Date -Format g
+
+"Value: $value"
+"Time: $time"
+# Connect to PI, Write value, and disconnect
+$piConn = Connect-PIDataArchive -PIDataArchiveMachineName $piServer
+Add-PIValue -PointName $pointName -Value $value -Time $time -Connection $piConn -WriteMode Append -Verbose
+Disconnect-PIDataArchive -Connection $piConn | Out-Null
